@@ -20,12 +20,12 @@ def pLoad(fileName): #Use pickle to load fileName into object
 #v-----VARIABLE DEFINITIONS-----v
 #Server and Role IDs for the bot to reference later
 #These need to be changed to match whatever server you want to run the bot on
-serverID=1087918199972053004
-gmRoleID=1091835818475270164
-deadRoleID=1088273637838176317
-playingRoleID=1088273694150901830
-#The channel that the bot prints output and logs to
-logChannelID=1091826274630107227
+serverID=0
+gmRoleID=0
+deadRoleID=0
+playingRoleID=0
+#The channel that the bot prints output and logs to. Also needs changed to match the server
+logChannelID=0
 #fileNames for saved objects
 playersSaveFile="players.pickle"
 stateSaveFile="state.pickle"
