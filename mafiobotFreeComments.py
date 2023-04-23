@@ -618,7 +618,7 @@ async def on_message(message):
 			await logChannel.send(f'{message.author.mention} made it {state.returnDayState()}!')
 			message.delete()
 
-	if(message.content=="!hellaComments"):
+	if(message.content=="!killBot"):
 		isAllowed=False
 		for role in message.author.roles:
 			if role.id==gmRoleID:
@@ -627,9 +627,9 @@ async def on_message(message):
 		if not isAllowed:
 			await message.delete()
 		else:
-			for p in players:
-				p.commentsRemaining=9999999
 			await message.delete()
+			await logChannel.send(f'{message.author.display_name} has killed the bot!')
+			quit()
 
 #v-----Run when bot is ready-----v
 @client.event
