@@ -4,11 +4,15 @@ class gameState:
 		self.isDay=False
 		self.phaseNumber=0
 		self.dayChannelID=None
+		self.freeComments=True
+		self.isMasquerade=False
 
 	def resetState(self):
 		self.isDay=False
 		self.phaseNumber=0
 		self.dayChannelID=None
+		self.freeComments=True
+		self.isMasquerade=False
 
 	def advancePhase(self):
 		if self.isDay:
@@ -34,4 +38,5 @@ class player:
 		self.canOverhear=False
 		self.canVigShot=False
 		self.canCallMeeting=False
-		self.parlayAmmo=0
+		self.maskName=None
+		self.maskImageURL=None

@@ -1,14 +1,13 @@
-import discord #imports discord.py, includes everything needed here except for interaction commands
-from discord import app_commands #includes interaction commands
-import os #used to check if saved files exist, but primarily is used for os.linesep on fstrings
-import pickle #used to save and load objects like the player list, player channels, and game state. Importantly, pickle is not secure enough to be trusted with external objects. Only import things the bot makes
+import discord, os, pickle, aiohttp
+from dotenv import load_dotenv
+from discord import app_commands, Webhook
 
-from mafiobotClasses import gameState #imports the gameState object that tracks day/night and day channel
-from mafiobotClasses import player #imports the player object assigned to each player
-#^-----importing necessary packages-----^
+from mafiobotClasses import gameState
+from mafiobotClasses import player
 
-#v----- FUNCTION DEFINITIONS -----v
-#Defining often used functions up here to make further code easier to read and write:
+load_dotenv() #get private or server specific vars from .env
+
+#v----- Function Definitions-----v
 def pSave(objectToSave, fileName): #Use pickle to dump object into fileName
 	with open(fileName, 'wb') as f:
 		pickle.dump(objectToSave, f)
@@ -17,28 +16,23 @@ def pLoad(fileName): #Use pickle to load fileName into object
 		loadedObject = pickle.load(f)
 		return loadedObject
 
-#v-----VARIABLE DEFINITIONS-----v
-#Server and Role IDs for the bot to reference later
-#These need to be changed to match whatever server you want to run the bot on
-serverID=0
-gmRoleID=0
-deadRoleID=0
-playingRoleID=0
-#The channel that the bot prints output and logs to. Also needs changed to match the server
-logChannelID=0
-#fileNames for saved objects
+#v----- Variable Definitions -----v
+serverID=int(os.getenv('serverID'))
+thisServer=None
+gmRole=None
+deadRole=None
+playingRole=None
+logChannelID=int(os.getenv('logChannelID'))
 playersSaveFile="players.pickle"
 stateSaveFile="state.pickle"
 playerChannelsFile="playerChannels.pickle"
-#The token that tells the program which bot it is
-botToken='Revoked so that you nerds can\'t steal my bot'
-#telling the program to monitor all possible intents. Definitely not needed, will probably reign this in later
+botToken=os.getenv('botToken')
+masqueradeWebhookURL=os.getenv('masqueradeWebhookURL')
+raveyardWebhookURL=os.getenv('raveyardWebhookURL')
 intent=discord.Intents.all()
 
-#Create an object that represents the bot
 client = discord.Client(intents=intent)
 
-#Look for previously saved gameStates, player lists, and player channel assignments. If found, load them. If not, keep a default or empty version
 state=gameState()
 print(f'Looking for saved game state data at stateSaveFile')
 if os.path.isfile(stateSaveFile):
@@ -82,7 +76,7 @@ tree=app_commands.CommandTree(client)
 			)
 async def viewDayInfo(interaction):
 	global state
-	await interaction.response.send_message(f'It is {state.returnDayState()}!', ephemeral=True)
+	await interaction.response.send_message(f'It is {state.returnDayState()}! Free Comments={state.freeComments} Masquerade={state.isMasquerade}', ephemeral=True)
 
 @tree.command(
 	name='view_players',
@@ -101,24 +95,20 @@ async def viewPlayers(interaction):
 	guild=discord.Object(id=serverID)
 				)
 async def viewPlayer(interaction, target :discord.Member):
-	isAllowed=False
 	foundPlayer=False
 	playerIndex=None
 	global players
-	for role in interaction.user.roles:
-		if (role.id==gmRoleID or interaction.user.id==target.id):
-			isAllowed=True
 	for i, p in enumerate(players):
 		if p.memID==target.id:
 			foundPlayer=True
 			playerIndex=i
-	if not isAllowed:
+	if ((not gmRole in interaction.user.roles) and (not interaction.user.id==target.id)):
 		await interaction.response.send_message('Only GMs can use this command on other people!', ephemeral=True)
 	elif not foundPlayer:
 		await interaction.response.send_message('This person is not in the list of active players!', ephemeral=True)
 	else:
 		tempPlayer=players[playerIndex] #v----- There's gotta be an easier way to make this line lol
-		await interaction.response.send_message(f'{target.display_name}:{os.linesep}ID:{tempPlayer.memID}{os.linesep}Comments Remaining:{tempPlayer.commentsRemaining}{os.linesep}Can Overhear:{tempPlayer.canOverhear}{os.linesep}Can Michael Shot:{tempPlayer.canVigShot}{os.linesep}Can Call A Meeting: {tempPlayer.canCallMeeting}{os.linesep}Parlay Ammo:{tempPlayer.parlayAmmo}', ephemeral=True)
+		await interaction.response.send_message(f'{target.display_name}:{os.linesep}ID:{tempPlayer.memID}{os.linesep}Comments Remaining:{tempPlayer.commentsRemaining}{os.linesep}Can Overhear:{tempPlayer.canOverhear}{os.linesep}Can Michael Shot:{tempPlayer.canVigShot}{os.linesep}Can Call A Meeting: {tempPlayer.canCallMeeting}{os.linesep}Mask:{tempPlayer.maskName}{os.linesep}Mask Image:{tempPlayer.maskImageURL}', ephemeral=True)
 
 
 @tree.command(
@@ -130,17 +120,14 @@ async def callMeeting(interaction, message :str=None):
 	global players
 	global state
 	foundPlayer=False
-	isDead=False
 	isAble=False
 	for i, player in enumerate(players):
 		if player.memID==interaction.user.id:
 			meetingCallerIndex=i
 			foundPlayer=True
 			isAble = player.canCallMeeting
-			for role in interaction.user.roles:
-				if role.id==deadRoleID:
-					isDead=True
-	if isDead:
+
+	if deadRole in interaction.user.roles:
 		await interaction.response.send_message(f'You must be alive to call an emergency meeting!', ephemeral=True)
 	elif not isAble:
 		await interaction.response.send_message(f'Your role is not able to call meetings!', ephemeral=True)
@@ -153,7 +140,7 @@ async def callMeeting(interaction, message :str=None):
 		state.advancePhase()
 		embed=discord.Embed(
 			title=f'***I\'VE CALLED AN EMERGENCY MEETING***',
-			description=f'{message}{os.linesep}It is now {state.returnDayState()}!{os.linesep}<@&{playingRoleID}>',
+			description=f'{message}{os.linesep}It is now {state.returnDayState()}!',
 			color=discord.Colour.red()
 						)
 		embed.set_author(
@@ -173,11 +160,8 @@ async def callMeeting(interaction, message :str=None):
 			)
 async def setPlayerChannel(interaction, target_player :discord.Member, target_channel_id :str):
 	global playerChannels
-	isAllowed=False
-	for role in interaction.user.roles:
-		if role.id==gmRoleID:
-			isAllowed=True
-	if not isAllowed:
+
+	if not gmRole in interaction.user.roles:
 		await interaction.response.send_message(f'Only GMs can use this command!', ephemeral=True)
 	else:
 		targetChannel=client.get_channel(int(target_channel_id))
@@ -190,6 +174,68 @@ async def setPlayerChannel(interaction, target_player :discord.Member, target_ch
 			await targetChannel.send(f'This channel has been designated {target_player.mention}\'s player channel!')
 			await interaction.response.send_message(f'Done! Saving playerChannels to file', ephemeral=True)
 			pSave(playerChannels, playerChannelsFile)
+
+@tree.command(
+	name="set_mask",
+	description="GM command to set a user's mask",
+	guild=discord.Object(id=serverID)
+			)
+async def setMask(interaction, target :discord.Member, mask_name :str, pfp :discord.Attachment):
+	global players
+	foundTarget=False
+	targetIndex=None
+	for i, p in enumerate(players):
+		if target.id==p.memID:
+			foundTarget=True
+			targetIndex=i
+		
+	if not gmRole in interaction.user.roles:
+		await interaction.response.send_message("Only GMs can use this command!", ephemeral=True)
+	elif not foundTarget:
+		await interaction.response.send_message("Your target was not in the list of active players!", ephemeral=True)
+	else:
+		players[targetIndex].maskName=mask_name
+		players[targetIndex].maskImageURL=pfp.url
+		pSave(players, playersSaveFile)
+		await interaction.response.send_message("Set!", ephemeral=True)
+
+@tree.command(
+	name='m',
+	description='Use your mask to talk in day chat. Only works during Masquerades.',
+	guild=discord.Object(id=serverID)
+			)
+async def maskChat(interaction, message :str, attachment :discord.Attachment=None):
+	global players
+	foundSpeaker=False
+	speakerIndex=None
+	
+	for i, p in enumerate(players):
+		if interaction.user.id==p.memID:
+			foundSpeaker=True
+			speakerIndex=i
+	if not foundSpeaker:
+		await interaction.response.send_message(f'You are not in the list of active players!', ephemeral=True)
+	elif (players[speakerIndex].maskName==None or players[speakerIndex].maskImageURL==None):
+		await interaction.response.send_message(f'You don\'t have a mask set up! Have a GM use /set_mask to give you one!', ephemeral=True)
+	elif not state.isMasquerade:
+		await interaction.response.send_message(f'This command can only be used during masquerades!', ephemeral=True)
+	elif not state.isDay:
+		await interaction.response.send_message(f'You can only do this during the day!', ephemeral=True)
+	else:
+		async with aiohttp.ClientSession() as session:
+			if deadRole in interaction.user.roles:
+				webhook=Webhook.from_url(raveyardWebhookURL, session=session)
+				await webhook.send(message, username=players[speakerIndex].maskName, avatar_url=players[speakerIndex].maskImageURL)
+				if not attachment==None:
+					await webhook.send(attachment.url, username=players[speakerIndex].maskName, avatar_url=players[speakerIndex].maskImageURL)
+				await interaction.response.send_message(f'***In Raveyard:*** {message}', ephemeral=True)
+			else:
+				webhook=Webhook.from_url(masqueradeWebhookURL, session=session)
+				await webhook.send(message, username=players[speakerIndex].maskName, avatar_url=players[speakerIndex].maskImageURL)
+				if not attachment==None:
+					await webhook.send(attachment.url, username=players[speakerIndex].maskName, avatar_url=players[speakerIndex].maskImageURL)
+				await interaction.response.send_message(f'{message}', ephemeral=True)
+
 @tree.command(
 	name='comment',
 	description='Leave a comment in another player\'s player channel',
@@ -208,10 +254,6 @@ async def comment(interaction, recipient :discord.Member, anon :bool=True, messa
 	recipientPlayerChannel=None
 	wasOverheard=False
 	overheardIn=None
-	if anon:
-		sender="Anon"
-	else:
-		sender=interaction.user.display_name
 	for i, player in enumerate(players):
 		if player.memID==interaction.user.id:
 			foundSender=True
@@ -230,26 +272,38 @@ async def comment(interaction, recipient :discord.Member, anon :bool=True, messa
 			if str(player.memID) in playerChannels:
 				wasOverheard=True
 				overheardIn=client.get_channel(playerChannels[str(player.memID)])
-	if not (state.isDay or state.phaseNumber==1):
-		await interaction.response.send_message(f'You can only send comments during the day or night 1!', ephemeral=True)
+	if not (state.isDay or state.freeComments):
+		await interaction.response.send_message(f'You can only send comments during the day or during I Talk Good!', ephemeral=True)
 	elif not foundSender:
 		await interaction.response.send_message(f'You are not in the list of active players!', ephemeral=True)
 	elif not foundRecipient:
 		await interaction.response.send_message(f'Your target is not in the list of active players!', ephemeral=True)
-	elif not senderHasComments:
+	elif not (senderHasComments or state.freeComments):
 		await interaction.response.send_message(f'You are out of comments!', ephemeral=True)
+	elif deadRole in interaction.user.roles:
+		await interaction.response.send_message(f'You can\'t send comments if you\'re dead!', ephemeral=True)
+	elif deadRole in recipient.roles:
+		await interaction.response.send_message(f'Your recipient is dead!', ephemeral=True)
 	elif recipientPlayerChannel==None:
-		await interaction.response.send_message(f'Your recipient doesn\'t have a player cannel! Have a gm use /set_player_channel to give them one!', ephemeral=True)
+		await interaction.response.send_message(f'Your recipient doesn\'t have a player channel! Have a gm use /set_player_channel to give them one!', ephemeral=True)
 	elif senderPlayerChannel==None:
 		await interaction.response.send_message(f'You don\'t have a player channel! Have a GM use /set_player_channel to give you one!', ephemeral=True)
+	elif state.isMasquerade:
+		await interaction.response.send_message(f'It\'s a masquerade! Use /mcomment to send a comment between masks!', ephemeral=True)
 	else:
+
+		if not attachment==None:
+			message = f'{attachment.url}{os.linesep}{os.linesep}{message}'
+
 		outboundEmbed=discord.Embed(
 			title=f'**A Message!:**',
 			description=f'{message}',
 			color=discord.Colour.blue()
 									)
+		if anon:
+			sentAs='Anon'
 		loggedEmbed=discord.Embed(
-			title=f'**You commented {players[recipientIndex].displayName}**',
+			title=f'**You commented {players[recipientIndex].displayName}**, anon={anon}',
 			description=f'{message}',
 			color=discord.Colour.green()
 									)
@@ -259,30 +313,26 @@ async def comment(interaction, recipient :discord.Member, anon :bool=True, messa
 			color=discord.Colour.red()
 									)
 
-		if not attachment==None:
-			outboundEmbed.set_image(url=attachment.url)
-			loggedEmbed.set_image(url=attachment.url)
-			overheardEmbed.set_image(url=attachment.url)
-
-		if not anon:
-			outboundEmbed.set_author(name=f'{sender}', icon_url=interaction.user.avatar.url)
+		if anon:
+			outboundEmbed.set_author(name=f'Anon', icon_url='https://creazilla-store.fra1.digitaloceanspaces.com/emojis/44265/disguised-face-emoji-clipart-md.png')
 		else:
-			outboundEmbed.set_author(name=f'{sender}', icon_url='https://creazilla-store.fra1.digitaloceanspaces.com/emojis/44265/disguised-face-emoji-clipart-md.png')
+			outboundEmbed.set_author(name=f'{interaction.user.display_name}', icon_url=interaction.user.avatar.url)
 
 		await recipientPlayerChannel.send(f'', embed=outboundEmbed)
 		await senderPlayerChannel.send(f'', embed=loggedEmbed)
 		if wasOverheard:
 			await overheardIn.send(f'', embed=overheardEmbed)
-		players[senderIndex].commentsRemaining-=1
+		if not state.freeComments:
+			players[senderIndex].commentsRemaining-=1
 		await interaction.response.send_message(f'Sent! You have {players[senderIndex].commentsRemaining} comments remaining!', ephemeral=True)
 		pSave(players, playersSaveFile)
 
 @tree.command(
-	name='parlay',
-	description='Deliver a faked comment using the Hunger\'s Parlay ability',
+	name='mcomment',
+	description='Comments, but with a *mask!*',
 	guild=discord.Object(id=serverID)
 			)
-async def parlay(interaction, recipient :discord.Member, disguise :discord.Member, anon :bool=False, message :str=None, attachment :discord.Attachment=None):
+async def maskedComment(interaction, recipient :str, anon :bool=True, message :str=None, attachment :discord.Attachment=None):
 	global players
 	global playerChannels
 	global state
@@ -295,48 +345,59 @@ async def parlay(interaction, recipient :discord.Member, disguise :discord.Membe
 	recipientPlayerChannel=None
 	wasOverheard=False
 	overheardIn=None
-	if anon:
-		sender="Anon"
-	else:
-		sender=disguise.display_name
 	for i, player in enumerate(players):
 		if player.memID==interaction.user.id:
 			foundSender=True
 			senderIndex=i
-			if player.parlayAmmo>0:
+			if player.commentsRemaining>0:
 				senderHasComments=True
 			if str(player.memID) in playerChannels:
 				senderPlayerChannel=client.get_channel(playerChannels[str(player.memID)])
-		if player.memID==recipient.id:
+		if str(player.maskName).upper()==recipient.upper():
 			foundRecipient=True
 			recipientIndex=i
 			if str(player.memID) in playerChannels:
 				recipientPlayerChannel=client.get_channel(playerChannels[str(player.memID)])
+				recipientPlayerObject=thisServer.get_member(player.memID)
 	for i, player in enumerate(players):
 		if(player.canOverhear and (not i==senderIndex) and (not i==recipientIndex)):
 			if str(player.memID) in playerChannels:
 				wasOverheard=True
 				overheardIn=client.get_channel(playerChannels[str(player.memID)])
-	if not (state.isDay or state.phaseNumber==1):
+	if not (state.isDay or state.freeComments):
 		await interaction.response.send_message(f'You can only send comments during the day or night 1!', ephemeral=True)
 	elif not foundSender:
 		await interaction.response.send_message(f'You are not in the list of active players!', ephemeral=True)
 	elif not foundRecipient:
-		await interaction.response.send_message(f'Your target is not in the list of active players!', ephemeral=True)
-	elif not senderHasComments:
-		await interaction.response.send_message(f'You are out of Parlay ammo!', ephemeral=True)
+		await interaction.response.send_message(f'Could not locate anyone wearing that mask!', ephemeral=True)
+	elif not (senderHasComments or state.freeComments):
+		await interaction.response.send_message(f'You are out of comments!', ephemeral=True)
+	elif deadRole in interaction.user.roles:
+		await interaction.response.send_message(f'You can\'t send comments if you\'re dead!', ephemeral=True)
+	elif deadRole in recipientPlayerObject.roles:
+		await interaction.response.send_message(f'Your recipient is dead!', ephemeral=True)
 	elif recipientPlayerChannel==None:
-		await interaction.response.send_message(f'Your recipient doesn\'t have a player cannel! Have a gm use /set_player_channel to give them one!', ephemeral=True)
+		await interaction.response.send_message(f'Your recipient doesn\'t have a player channel! Have a gm use /set_player_channel to give them one!', ephemeral=True)
 	elif senderPlayerChannel==None:
 		await interaction.response.send_message(f'You don\'t have a player channel! Have a GM use /set_player_channel to give you one!', ephemeral=True)
+	elif not state.isMasquerade:
+		await interaction.response.send_message(f'We are not at a masquerade. :pensive: You\'ll have to use boring old regular /comment', ephemeral=True)
 	else:
+
+		if not attachment==None:
+			message = f'{attachment.url}{os.linesep}{os.linesep}{message}'
+
 		outboundEmbed=discord.Embed(
-			title=f'**A Message!:**',
+			title=f'',
 			description=f'{message}',
 			color=discord.Colour.blue()
 									)
+		if anon:
+			sentAs='Anon'
+		else:
+			sentAs=players[senderIndex].maskName
 		loggedEmbed=discord.Embed(
-			title=f'**You Parlayed with {recipient.display_name} while disguised as {sender}**',
+			title=f'**You commented {recipient}** as {sentAs}',
 			description=f'{message}',
 			color=discord.Colour.green()
 									)
@@ -346,22 +407,20 @@ async def parlay(interaction, recipient :discord.Member, disguise :discord.Membe
 			color=discord.Colour.red()
 									)
 
-		if not attachment==None:
-			outboundEmbed.set_image(url=attachment.url)
-			loggedEmbed.set_image(url=attachment.url)
-			overheardEmbed.set_image(url=attachment.url)
-		if not anon:
-			outboundEmbed.set_author(name=f'{sender}', icon_url=disguise.avatar.url)
+		if anon:
+			outboundEmbed.set_author(name=f'Anon', icon_url='https://creazilla-store.fra1.digitaloceanspaces.com/emojis/44265/disguised-face-emoji-clipart-md.png')
 		else:
-			outboundEmbed.set_author(name=f'{sender}', icon_url='https://creazilla-store.fra1.digitaloceanspaces.com/emojis/44265/disguised-face-emoji-clipart-md.png')
+			outboundEmbed.set_author(name=f'{sentAs}', icon_url=players[senderIndex].maskImageURL)
 
 		await recipientPlayerChannel.send(f'', embed=outboundEmbed)
 		await senderPlayerChannel.send(f'', embed=loggedEmbed)
 		if wasOverheard:
 			await overheardIn.send(f'', embed=overheardEmbed)
-		players[senderIndex].parlayAmmo-=1
-		await interaction.response.send_message(f'Sent! You have {players[senderIndex].parlayAmmo} Parlays remaining!', ephemeral=True)
+		if not state.freeComments:
+			players[senderIndex].commentsRemaining-=1
+		await interaction.response.send_message(f'Sent! You have {players[senderIndex].commentsRemaining} comments remaining!', ephemeral=True)
 		pSave(players, playersSaveFile)
+
 #################################################
 #####            CONTEXT COMMANDS           #####
 #################################################
@@ -372,10 +431,13 @@ async def parlay(interaction, recipient :discord.Member, disguise :discord.Membe
 async def setDayChannel(interaction, target :discord.Message):
 	global state
 	global dayChannel
-	state.dayChannelID=target.channel.id
-	dayChannel=client.get_channel(state.dayChannelID)
-	pSave(state, stateSaveFile)
-	await interaction.response.send_message(f'Day channel set to {dayChannel.name}!', ephemeral=True)
+	if not gmRole in interaction.user.roles:
+		await interaction.response.send_message(f'Only GMs can use this command!', ephemeral=True)
+	else:
+		state.dayChannelID=target.channel.id
+		dayChannel=client.get_channel(state.dayChannelID)
+		pSave(state, stateSaveFile)
+		await interaction.response.send_message(f'Day channel set to {dayChannel.name}!', ephemeral=True)
 
 @tree.context_menu(
 	name='Shoot This Player',
@@ -388,16 +450,8 @@ async def vigShot(interaction, target :discord.Member):
 	foundTarget=False
 	shooterIndex=None
 	targetIndex=None
-	shooterDead=False
-	targetDead=False
 	shooterHasAmmo=False
 
-	for role in interaction.user.roles:
-		if role.id==deadRoleID:
-			shooterDead=True
-	for role in target.roles:
-		if role.id==deadRoleID:
-			targetDead=True
 	for i, player in enumerate(players):
 		if(player.memID==interaction.user.id):
 			shooterIndex=i
@@ -413,9 +467,9 @@ async def vigShot(interaction, target :discord.Member):
 		await interaction.response.send_message(f'Your target is not in the list of active players!', ephemeral=True)
 	elif not shooterHasAmmo:
 		await interaction.response.send_message(f'You don\'t have ammo for that!', ephemeral=True)
-	elif shooterDead:
+	elif deadRole in interaction.user.roles:
 		await interaction.response.send_message(f'You can\'t shoot while dead!', ephemeral=True)
-	elif targetDead:
+	elif deadRole in target.roles:
 		await interaction.response.send_message(f'You can\'t shoot dead people!', ephemeral=True)
 	elif state.phaseNumber<=1:
 		await interaction.response.send_message(f'You can\'t shoot until Day 2!', ephemeral=True)
@@ -426,7 +480,7 @@ async def vigShot(interaction, target :discord.Member):
 		state.advancePhase()
 		embed=discord.Embed(
 			title=f'***BANG***',
-			description=f'{interaction.user.display_name} has shot {target.display_name} to death!{os.linesep}It is {state.returnDayState()}!{os.linesep}<@&{playingRoleID}>',
+			description=f'{interaction.user.display_name} has shot {target.display_name} to death!{os.linesep}It is {state.returnDayState()}!{os.linesep}',
 			color=discord.Colour.blue()
 							)
 		embed.set_author(
@@ -436,7 +490,6 @@ async def vigShot(interaction, target :discord.Member):
 		await dayChannel.send(f'', embed=embed)
 
 		players[shooterIndex].canVigShot=False
-		deadRole=discord.utils.get(interaction.guild.roles, id=deadRoleID)
 		await target.add_roles(deadRole)
 		pSave(players, playersSaveFile)
 		pSave(state, stateSaveFile)
@@ -451,18 +504,14 @@ async def vigShot(interaction, target :discord.Member):
 	guild=discord.Object(id=serverID)
 				)
 async def toggleCanMeeting(interaction, target :discord.Member):
-	isAllowed=False
 	foundTarget=False
 	targetIndex=None
 	global players
-	for role in interaction.user.roles:
-		if role.id==gmRoleID:
-			isAllowed=True
 	for i, p in enumerate(players):
 		if p.memID==target.id:
 			foundTarget=True
 			targetIndex=i
-	if not isAllowed:
+	if not gmRole in interaction.user.roles:
 		await interaction.response.send_message(f'Only GMs can use this command!', ephemeral=True)
 	elif not foundTarget:
 		await interaction.response.send_message(f'The chosen member is not in the list of active players!', ephemeral=True)
@@ -481,18 +530,14 @@ async def toggleCanMeeting(interaction, target :discord.Member):
 	guild=discord.Object(id=serverID)
 				)
 async def toggleOverhearing(interaction, target :discord.Member):
-	isAllowed=False
 	foundTarget=False
 	targetIndex=None
 	global players
-	for role in interaction.user.roles:
-		if role.id==gmRoleID:
-			isAllowed=True
 	for i, p in enumerate(players):
 		if p.memID==target.id:
 			foundTarget=True
 			targetIndex=i
-	if not isAllowed:
+	if not gmRole in interaction.user.roles:
 		await interaction.response.send_message(f'Only GMs can use this command!', ephemeral=True)
 	elif not foundTarget:
 		await interaction.response.send_message(f'The chosen member is not in the list of active players!', ephemeral=True)
@@ -511,18 +556,14 @@ async def toggleOverhearing(interaction, target :discord.Member):
 	guild=discord.Object(id=serverID)
 				)
 async def toggleVigShot(interaction, target :discord.Member):
-	isAllowed=False
 	foundTarget=False
 	targetIndex=None
 	global players
-	for role in interaction.user.roles:
-		if role.id==gmRoleID:
-			isAllowed=True
 	for i, p in enumerate(players):
 		if p.memID==target.id:
 			foundTarget=True
 			targetIndex=i
-	if not isAllowed:
+	if not gmRole in interaction.user.roles:
 		await interaction.response.send_message(f'Only GMs can use this command!', ephemeral=True)
 	elif not foundTarget:
 		await interaction.response.send_message(f'The chosen member is not in the list of active players!', ephemeral=True)
@@ -536,36 +577,6 @@ async def toggleVigShot(interaction, target :discord.Member):
 			pSave(players, playersSaveFile)
 			await interaction.response.send_message(f'{players[targetIndex].displayName} can now use Michael\'s Revenge!', ephemeral=True)
 
-@tree.context_menu(
-	name="Toggle Parlay",
-	guild=discord.Object(id=serverID)
-				)
-async def toggleParlayAmmo(interaction, target :discord.Member):
-	isAllowed=False
-	foundTarget=False
-	targetIndex=None
-	global players
-	for role in interaction.user.roles:
-		if role.id==gmRoleID:
-			isAllowed=True
-	for i, p in enumerate(players):
-		if p.memID==target.id:
-			foundTarget=True
-			targetIndex=i
-	if not isAllowed:
-		await interaction.response.send_message(f'Only GMs can use this command!', ephemeral=True)
-	elif not foundTarget:
-		await interaction.response.send_message(f'The chosen member is not in the list of active players!', ephemeral=True)
-	else:
-		if not players[targetIndex].parlayAmmo==0:
-			players[targetIndex].canVigShot=0
-			pSave(players, playersSaveFile)
-			await interaction.response.send_message(f'{players[targetIndex].displayName} can no longer use Parlay!', ephemeral=True)
-		else:
-			players[targetIndex].parlayAmmo=3
-			pSave(players, playersSaveFile)
-			await interaction.response.send_message(f'{players[targetIndex].displayName} can now use Parlay {players[targetIndex].parlayAmmo} times!', ephemeral=True)
-
 ##################################################
 #####             CHAT COMMANDS              #####
 ##################################################
@@ -577,90 +588,118 @@ async def on_message(message):
 	if(message.author==client.user):
 		return
 
-	if(message.content=='!initPlayers'):
-		for role in message.author.roles:
-			if role.id==gmRoleID:
-				players=[]
-				for member in message.guild.members:
-					for role in member.roles:
-						if role.id==playingRoleID:
-							thisPlayer=player(f'{member.name}#{member.discriminator}', member.display_name, member.id)
-							players.append(thisPlayer)
-				await logChannel.send(f'Players list populated! List currently consists of:')
-				outputString = ""
-				for i in players:
-					outputString+=f'{i.displayName}{os.linesep}'
-				await logChannel.send(f'{outputString}')
-				await logChannel.send(f'Saving players list to playersSaveFile')
-				pSave(players, playersSaveFile)
-				await logChannel.send(f'Saved!')
+	if(message.content=='/initPlayers'):
+		if gmRole in message.author.roles:
+			players=[]
+			for member in message.guild.members:
+				if playingRole in member.roles:
+					thisPlayer=player(f'{member.name}#{member.discriminator}', member.display_name, member.id)
+					players.append(thisPlayer)
+			await logChannel.send(f'Players list populated! List currently consists of:')
+			outputString = ""
+			for i in players:
+				outputString+=f'{i.displayName}{os.linesep}'
+			await logChannel.send(f'{outputString}')
+			await logChannel.send(f'Saving players list to playersSaveFile')
+			pSave(players, playersSaveFile)
+			await logChannel.send(f'Saved!')
 		await message.delete()
 
-	if(message.content=='!viewDayChannel'):
-		await logChannel.send(f'{message.author.mention}{dayChannel.name}')
+	if(message.content=='/viewDayChannel'):
+		if gmRole in message.author.roles:
+			await logChannel.send(f'{message.author.mention}{dayChannel.name}')
 		await message.delete()
 
-	if(message.content=='!advancePhase'):
-		isAllowed=False
-		for role in message.author.roles:
-			if role.id==gmRoleID:
-				isAllowed=True
-		if not isAllowed:
+	if(message.content=='/advancePhase'):
+		if not gmRole in message.author.roles:
 			await message.delete()
 		else:
 			oldPhaseNumber=state.phaseNumber
 			state.advancePhase()
 			newPhaseNumber=state.phaseNumber
 			if not (newPhaseNumber==oldPhaseNumber):
+				for p in players:
+					p.commentsRemaining=3
 				if newPhaseNumber==1:
-					for p in players:
-						p.commentsRemaining=99999
+					state.freeComments=True
 				else:
-					for p in players:
-						p.commentsRemaining=3
+					state.freeComments=False
+			else:
+				try:
+					await dayChannel.set_permissions(interaction.guild.default_role, send_messages=False)
+				except:
+					logChannel.send(f'Couldn\'t lock day channel. Does it exist? Check with !viewDayChannel')
 			pSave(players, playersSaveFile)
 		pSave(state, stateSaveFile)
 		await logChannel.send(f'{message.author.display_name} advanced the phase! It is now {state.returnDayState()}!')
 		await message.delete()
 
-	if(message.content=='!resetState'):
-		isAllowed=False
-		for role in message.author.roles:
-			if role.id==gmRoleID:
-				isAllowed=True
-		if not isAllowed:
+	if(message.content=='/resetState'):
+		if not gmRole in message.author.roles:
 			await message.delete()
 		else:
 			state.resetState()
-			await logChannel.send(f'{message.author.mention} has reset to Night 0 with no day channel!')
+			await logChannel.send(f'{message.author.mention} has reset to Night 0 with no day channel, free comments, and no masquerade!')
 			pSave(state, stateSaveFile)
 			await message.delete()
 
-	if(message.content=="!toggleDay"):
-		isAllowed=False
-		for role in message.author.roles:
-			if role.id==gmRoleID:
-				isAllowed=True
-		if not isAllowed:
-			message.delete()
+	if(message.content=="/toggleDay"):
+		if not gmRole in message.author.roles:
+			await message.delete()
 		else:
 			if state.isDay:
 				state.isDay=False
 			else:
 				state.isDay=True
-			await logChannel.send(f'{message.author.mention} made it {state.returnDayState()}!')
-			message.delete()
+			pSave(state, stateSaveFile)
+			await logChannel.send(f'{message.author.mention} toggled day/night, making it {state.returnDayState()}!')
+			await message.delete()
+
+	if(message.content=='/toggleFreeComments'):
+		if not gmRole in message.author.roles:
+			await message.delete()
+		else:
+			if state.freeComments:
+				state.freeComments=False
+			else:
+				state.freeComments=True
+			pSave(state, stateSaveFile)
+			await logChannel.send(f'{message.author.mention} has set free comments to {state.freeComments}!')
+			await message.delete()
+
+	if(message.content=='/toggleMasquerade'):
+		if not gmRole in message.author.roles:
+			await message.delete()
+		else:
+			if state.isMasquerade:
+				state.isMasquerade=False
+			else:
+				state.isMasquerade=True
+			pSave(state, stateSaveFile)
+			await logChannel.send(f'{message.author.mention} has set masquerade mode to {state.isMasquerade}!')
+			await message.delete()
 
 
-#v-----Run when bot is ready-----v
+#v-----Run when bot is ready -----v
 @client.event
 async def on_ready():
 	global logChannel
 	global dayChannel
+	global gmRole
+	global deadRole
+	global playingRole
+	global serverID
+	global thisServer
 	logChannel=client.get_channel(logChannelID)
-	dayChannel = client.get_channel(state.dayChannelID)
+	dayChannel=client.get_channel(state.dayChannelID)
+	for guild in client.guilds:
+		if guild.id==serverID:
+			thisServer=guild
+	gmRole=discord.utils.get(thisServer.roles,name="Game Master")
+	deadRole=discord.utils.get(thisServer.roles,name="Dead")
+	print(deadRole.name)
+	playingRole=discord.utils.get(thisServer.roles,name="Playing")
 	await tree.sync(guild=discord.Object(id=serverID))
+	print('Bot is ready!')
 
-
-#v-----RUN IT FOR REAL-----v
 client.run(botToken)

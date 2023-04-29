@@ -1,16 +1,24 @@
 # Mafiobot
  TAZCJ Mafia Discord Bot
 
-Hey!
+# SETUP
 
-I don't know what goes in a GH readme so until I write a real one, have a little shpiel.
+Before all else (and hopefully only once ever per player) designate each player's player channel. To do so, use /set_player_channel. This command takes two arguments: a discord member (the list of which will populate as you begin typing) and a channel ID. The channel ID can be found by right clicking the desired channel and clicking "Copy Channel ID." If successful, the channel in question will display a message tagging the user it's been assigned to.
 
-I still have a lot of work to do and features to add, but now that comments, vig shot, and emergency meeting are added I feel confident releasing something that will at least make GMs lives a little easier and make players a little more independent.
+Next, make sure all users playing (and only the users playing) have been given the Player role and do !initPlayers. This will create a player object for each player and add them all to a list called players. The exact contents of that object are viewable in mafiobotClasses.py
 
-I am positive there are things that could be done better. It's been ages since I earnestly attemped to do something like this. I took CS classes in college more than a decade ago and then realized that programming outside of little hobby things is soul crushingly boring and haven't really done it in any personal capacity in the 10-ish years since. I tried to intern/shadow/work/whatever at multiple places and found out that they all just specialized in weirdly narrow things like "We make the shopping carts for online stores" and the idea of 40 hour weeks of coding that over and over made me wanna fucking die.
+Run !resetState. This will ensure you are starting with the typical default mafia game setup. What exactly that entails can be viewed in mafiobotClasses.py and is also output to the log channel. Create your day 1 channel and type any message in it. Right click that message and go to apps->set as day channel. This tells the bot where to put relevant messages and what channel to lock as night falls.
 
-If there are things to be improved, please let me know. I'd love to keep learning about how to properly do this! Doing something that I know people will use and that makes me feel like I'm contributing to something even as small as a weird little internet game has me more amped for this than I've been for a personal project in quite a while.
+Assign special traits to players. As of now this consists of:
+- Michael's Revenge
+- Emergency Meeting
+- Hunger/Ditto overhear
+- Mask name and picture
 
-The code is also super poorly commented. I'll work on it. In the meantime, if there's anything you have questions about or would like explained let me know. I'd love to talk about it beyond just complaining in the test server about stuff no one else can see lol
+To enable the first 3, simply right click a player anywhere in the server and go to apps->toggle \*feature\*. This will provide you with an ephemeral response from the bot with the new value for that player, and can be confirmed later by using /view_player_info
 
-Thanks for looking!
+If you are running a masquerade game, do !toggleMasquerade to turn on mask mode, then for each player use /set_mask. /set_mask takes three arguments: The user whos mask you are setting, a string for the name of that mask, and an uploaded attachment for that mask's PFP. You will receieve an ephemeral response with the result of that command.
+
+# DURING THE GAME
+
+Remember before each day phase starts to right click a message in the new day phase channel and set it as the day channel. 
