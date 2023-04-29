@@ -319,19 +319,17 @@ async def comment(interaction, recipient :discord.Member, anon :bool=True, messa
 				outboundEmbed.set_image(url=attachment.url)
 				loggedEmbed.set_image(url=attachment.url)
 				overheardEmbed.set_image(url=attachment.url)
-			else:
-				messageText=attachment.url
 
 		if anon:
 			outboundEmbed.set_author(name=f'Anon', icon_url='https://creazilla-store.fra1.digitaloceanspaces.com/emojis/44265/disguised-face-emoji-clipart-md.png')
 		else:
 			outboundEmbed.set_author(name=f'{interaction.user.display_name}', icon_url=interaction.user.avatar.url)
 
-		await recipientPlayerChannel.send(f'{messageText}', embed=outboundEmbed)
-		await senderPlayerChannel.send(f'{messageText}', embed=loggedEmbed)
+		await recipientPlayerChannel.send(f'', embed=outboundEmbed)
+		await senderPlayerChannel.send(f'', embed=loggedEmbed)
 
 		if wasOverheard:
-			await overheardIn.send(f'{messageText}', embed=overheardEmbed)
+			await overheardIn.send(f'', embed=overheardEmbed)
 		if not state.freeComments:
 			players[senderIndex].commentsRemaining-=1
 			await interaction.response.send_message(f'Sent! You have {players[senderIndex].commentsRemaining} comments remaining!', ephemeral=True)
