@@ -292,18 +292,18 @@ async def comment(interaction, recipient :discord.Member, anon :bool=True, messa
 		await interaction.response.send_message(f'It\'s a masquerade! Use /mcomment to send a comment between masks!', ephemeral=True)
 	else:
 
-		if not attachment==None:
-			message = f'{attachment.url}{os.linesep}{os.linesep}{message}'
-
+		if anon:
+			sentAs='Anon'
+		else:
+			sentAs=interaction.user.display_name
+			
 		outboundEmbed=discord.Embed(
-			title=f'**A Message!:**',
+			title=f'',
 			description=f'{message}',
 			color=discord.Colour.blue()
 									)
-		if anon:
-			sentAs='Anon'
 		loggedEmbed=discord.Embed(
-			title=f'**You commented {players[recipientIndex].displayName}**, anon={anon}',
+			title=f'**You commented {players[recipientIndex].displayName}** as {sentAs}',
 			description=f'{message}',
 			color=discord.Colour.green()
 									)
@@ -313,18 +313,30 @@ async def comment(interaction, recipient :discord.Member, anon :bool=True, messa
 			color=discord.Colour.red()
 									)
 
+		messageText=''
+		if not attachment==None:
+			if 'image' in attachment.content_type:
+				outboundEmbed.set_image(url=attachment.url)
+				loggedEmbed.set_image(url=attachment.url)
+				overheardEmbed.set_image(url=attachment.url)
+			else:
+				messageText=attachment.url
+
 		if anon:
 			outboundEmbed.set_author(name=f'Anon', icon_url='https://creazilla-store.fra1.digitaloceanspaces.com/emojis/44265/disguised-face-emoji-clipart-md.png')
 		else:
 			outboundEmbed.set_author(name=f'{interaction.user.display_name}', icon_url=interaction.user.avatar.url)
 
-		await recipientPlayerChannel.send(f'', embed=outboundEmbed)
-		await senderPlayerChannel.send(f'', embed=loggedEmbed)
+		await recipientPlayerChannel.send(f'{messageText}', embed=outboundEmbed)
+		await senderPlayerChannel.send(f'{messageText}', embed=loggedEmbed)
+
 		if wasOverheard:
-			await overheardIn.send(f'', embed=overheardEmbed)
+			await overheardIn.send(f'{messageText}', embed=overheardEmbed)
 		if not state.freeComments:
 			players[senderIndex].commentsRemaining-=1
-		await interaction.response.send_message(f'Sent! You have {players[senderIndex].commentsRemaining} comments remaining!', ephemeral=True)
+			await interaction.response.send_message(f'Sent! You have {players[senderIndex].commentsRemaining} comments remaining!', ephemeral=True)
+		else:
+			await interaction.response.send_message(f'Sent!', ephemeral=True)
 		pSave(players, playersSaveFile)
 
 @tree.command(
@@ -384,18 +396,16 @@ async def maskedComment(interaction, recipient :str, anon :bool=True, message :s
 		await interaction.response.send_message(f'We are not at a masquerade. :pensive: You\'ll have to use boring old regular /comment', ephemeral=True)
 	else:
 
-		if not attachment==None:
-			message = f'{attachment.url}{os.linesep}{os.linesep}{message}'
+		if anon:
+			sentAs='Anon'
+		else:
+			sentAs=players[senderIndex].maskName
 
 		outboundEmbed=discord.Embed(
 			title=f'',
 			description=f'{message}',
 			color=discord.Colour.blue()
 									)
-		if anon:
-			sentAs='Anon'
-		else:
-			sentAs=players[senderIndex].maskName
 		loggedEmbed=discord.Embed(
 			title=f'**You commented {recipient}** as {sentAs}',
 			description=f'{message}',
@@ -406,6 +416,13 @@ async def maskedComment(interaction, recipient :str, anon :bool=True, message :s
 			description=f'{message}',
 			color=discord.Colour.red()
 									)
+
+		messageText=''
+		if not attachment==None:
+			if 'image' in attachment.content_type:
+				outboundEmbed.set_image(url=attachment.url)
+				loggedEmbed.set_image(url=attachment.url)
+				overheardEmbed.set_image(url=attachment.url)
 
 		if anon:
 			outboundEmbed.set_author(name=f'Anon', icon_url='https://creazilla-store.fra1.digitaloceanspaces.com/emojis/44265/disguised-face-emoji-clipart-md.png')
@@ -418,7 +435,9 @@ async def maskedComment(interaction, recipient :str, anon :bool=True, message :s
 			await overheardIn.send(f'', embed=overheardEmbed)
 		if not state.freeComments:
 			players[senderIndex].commentsRemaining-=1
-		await interaction.response.send_message(f'Sent! You have {players[senderIndex].commentsRemaining} comments remaining!', ephemeral=True)
+			await interaction.response.send_message(f'Sent! You have {players[senderIndex].commentsRemaining} comments remaining!', ephemeral=True)
+		else:
+			await interaction.response.send_message(f'Sent!', ephemeral=True)
 		pSave(players, playersSaveFile)
 
 #################################################
