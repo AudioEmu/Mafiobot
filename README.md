@@ -21,4 +21,4 @@ If you are running a masquerade game, do !toggleMasquerade to turn on mask mode,
 
 # DURING THE GAME
 
-Remember before each day phase starts to right click a message in the new day phase channel and set it as the day channel. 
+Remember before each day phase starts to right click a message in the new day phase channel and set it as the day channel. Also, if playing a masquerade game, remember to change the masquerade chat webhook (server settings->integrations->webhooks) to point to day chat as well.
