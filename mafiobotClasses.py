@@ -35,6 +35,7 @@ class player:
 		self.displayName=displayName
 		self.memID=memID
 		self.commentsRemaining=0
+		self.isDead=False
 		self.canOverhear=False
 		self.canVigShot=False
 		self.canCallMeeting=False

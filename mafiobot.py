@@ -108,8 +108,34 @@ async def viewPlayer(interaction, target :discord.Member):
 		await interaction.response.send_message('This person is not in the list of active players!', ephemeral=True)
 	else:
 		tempPlayer=players[playerIndex] #v----- There's gotta be an easier way to make this line lol
-		await interaction.response.send_message(f'{target.display_name}:{os.linesep}ID:{tempPlayer.memID}{os.linesep}Comments Remaining:{tempPlayer.commentsRemaining}{os.linesep}Can Overhear:{tempPlayer.canOverhear}{os.linesep}Can Michael Shot:{tempPlayer.canVigShot}{os.linesep}Can Call A Meeting: {tempPlayer.canCallMeeting}{os.linesep}Mask:{tempPlayer.maskName}{os.linesep}Mask Image:{tempPlayer.maskImageURL}', ephemeral=True)
+		await interaction.response.send_message(f'{target.display_name}:{os.linesep}ID:{tempPlayer.memID}{os.linesep}Comments Remaining:{tempPlayer.commentsRemaining}{os.linesep}Can Overhear:{tempPlayer.canOverhear}{os.linesep}Can Michael Shot:{tempPlayer.canVigShot}{os.linesep}Can Call A Meeting: {tempPlayer.canCallMeeting}{os.linesep}Mask:{tempPlayer.maskName}{os.linesep}Mask Image:{tempPlayer.maskImageURL}{os.linesep}Is dead:{tempPlayer.isDead}', ephemeral=True)
 
+@tree.command(
+	name='toggle_dead',
+	description='Sneakily mark a player as dead without the dead role. Only really useful during masquerade',
+	guild=discord.Object(id=serverID)
+			)
+async def toggleDead(interaction, target :discord.Member):
+	foundTarget=False
+	targetIndex=None
+	global players
+	for i, p in enumerate(players):
+		if p.memID==target.id:
+			foundTarget=True
+			targetIndex=i
+	if not gmRole in interaction.user.roles:
+		await interaction.response.send_message(f'Only GMs can use this command!', ephemeral=True)
+	elif not foundTarget:
+		await interaction.response.send_message(f'The chosen member is not in the list of active players!', ephemeral=True)
+	else:
+		if players[targetIndex].isDead:
+			players[targetIndex].isDead=False
+			pSave(players, playersSaveFile)
+			await interaction.response.send_message(f'{players[targetIndex].displayName} is no longer dead!', ephemeral=True)
+		else:
+			players[targetIndex].isDead=True
+			pSave(players, playersSaveFile)
+			await interaction.response.send_message(f'{players[targetIndex].displayName} is now dead!', ephemeral=True)
 
 @tree.command(
 	name='call_meeting',
@@ -127,7 +153,7 @@ async def callMeeting(interaction, message :str=None):
 			foundPlayer=True
 			isAble = player.canCallMeeting
 
-	if deadRole in interaction.user.roles:
+	if ((deadRole in interaction.user.roles) or (players[meetingCallerIndex].isDead)):
 		await interaction.response.send_message(f'You must be alive to call an emergency meeting!', ephemeral=True)
 	elif not isAble:
 		await interaction.response.send_message(f'Your role is not able to call meetings!', ephemeral=True)
@@ -200,6 +226,67 @@ async def setMask(interaction, target :discord.Member, mask_name :str, pfp :disc
 		await interaction.response.send_message("Set!", ephemeral=True)
 
 @tree.command(
+	name='mshoot',
+	description='Use during masquerade to shoot a target mask',
+	guild=discord.Object(id=serverID)
+				)
+async def maskedVigShot(interaction, target :str):
+	global players
+	global state
+	foundShooter=False
+	foundTarget=False
+	shooterIndex=None
+	targetIndex=None
+	shooterHasAmmo=False
+
+	for i, player in enumerate(players):
+		if(player.memID==interaction.user.id):
+			shooterIndex=i
+			foundShooter=True
+			shooterHasAmmo=player.canVigShot
+		if(str(player.maskName).upper()==target.upper()):
+			foundTarget=True
+			targetIndex=i
+	
+	if not foundShooter:
+		await interaction.response.send_message(f'You are not in the list of active players!', ephemeral=True)
+	elif ((players[shooterIndex].maskName==None) or (players[shooterIndex].maskImageURL==None)):
+		await interaction.response.send_message(f'You don\'t have a mask! Have a GM use /set_mask to give you one!', ephemeral=True)
+	elif not foundTarget:
+		await interaction.response.send_message(f'Could not find a mask with that name!', ephemeral=True)
+	elif not shooterHasAmmo:
+		await interaction.response.send_message(f'You don\'t have ammo for that!', ephemeral=True)
+	elif ((deadRole in interaction.user.roles) or (players[shooterIndex].isDead)):
+		await interaction.response.send_message(f'You can\'t shoot while dead!', ephemeral=True)
+	elif players[targetIndex].isDead:
+		await interaction.response.send_message(f'You can\'t shoot dead people!', ephemeral=True)
+	elif state.phaseNumber<=1:
+		await interaction.response.send_message(f'You can\'t shoot until Day 2!', ephemeral=True)
+	elif not state.isDay:
+		await interaction.response.send_message(f'You can only shoot during the day!', ephemeral=True)
+	elif not state.isMasquerade:
+		await interaction.response.send_message(f'You can only use this during masquerades! Instead, right click your victim and use apps->Shoot this player.', ephemeral=True)
+	else:
+		await dayChannel.set_permissions(interaction.guild.default_role, send_messages=False)
+		state.advancePhase()
+		embed=discord.Embed(
+			title=f'***BANG***',
+			description=f'{players[shooterIndex].maskName} has shot {players[targetIndex].maskName} to death!{os.linesep}It is {state.returnDayState()}!{os.linesep}',
+			color=discord.Colour.blue()
+							)
+		embed.set_author(
+			name="Michael",
+			icon_url="https://smtd.umich.edu/wp-content/uploads/2022/06/mcelroy-crop.png"
+						)
+		await dayChannel.send(f'', embed=embed)
+
+		players[shooterIndex].canVigShot=False
+		players[targetIndex].isDead=True
+		pSave(players, playersSaveFile)
+		pSave(state, stateSaveFile)
+		await interaction.response.send_message(f'You successfully shot your target!', ephemeral=True)
+
+@tree.command(
 	name='m',
 	description='Use your mask to talk in day chat. Only works during Masquerades.',
 	guild=discord.Object(id=serverID)
@@ -223,7 +310,7 @@ async def maskChat(interaction, message :str, attachment :discord.Attachment=Non
 		await interaction.response.send_message(f'You can only do this during the day!', ephemeral=True)
 	else:
 		async with aiohttp.ClientSession() as session:
-			if deadRole in interaction.user.roles:
+			if ((deadRole in interaction.user.roles) or (players[speakerIndex].isDead)):
 				webhook=Webhook.from_url(raveyardWebhookURL, session=session)
 				await webhook.send(message, username=players[speakerIndex].maskName, avatar_url=players[speakerIndex].maskImageURL)
 				if not attachment==None:
@@ -280,9 +367,9 @@ async def comment(interaction, recipient :discord.Member, anon :bool=True, messa
 		await interaction.response.send_message(f'Your target is not in the list of active players!', ephemeral=True)
 	elif not (senderHasComments or state.freeComments):
 		await interaction.response.send_message(f'You are out of comments!', ephemeral=True)
-	elif deadRole in interaction.user.roles:
+	elif ((deadRole in interaction.user.roles) or (players[senderIndex].isDead)):
 		await interaction.response.send_message(f'You can\'t send comments if you\'re dead!', ephemeral=True)
-	elif deadRole in recipient.roles:
+	elif ((deadRole in recipient.roles) or (players[recipientIndex].isDead)):
 		await interaction.response.send_message(f'Your recipient is dead!', ephemeral=True)
 	elif recipientPlayerChannel==None:
 		await interaction.response.send_message(f'Your recipient doesn\'t have a player channel! Have a gm use /set_player_channel to give them one!', ephemeral=True)
@@ -382,9 +469,9 @@ async def maskedComment(interaction, recipient :str, anon :bool=True, message :s
 		await interaction.response.send_message(f'Could not locate anyone wearing that mask!', ephemeral=True)
 	elif not (senderHasComments or state.freeComments):
 		await interaction.response.send_message(f'You are out of comments!', ephemeral=True)
-	elif deadRole in interaction.user.roles:
+	elif ((deadRole in interaction.user.roles) or (players[senderIndex].isDead)):
 		await interaction.response.send_message(f'You can\'t send comments if you\'re dead!', ephemeral=True)
-	elif deadRole in recipientPlayerObject.roles:
+	elif ((deadRole in recipientPlayerObject.roles) or (players[recipientIndex].isDead)):
 		await interaction.response.send_message(f'Your recipient is dead!', ephemeral=True)
 	elif recipientPlayerChannel==None:
 		await interaction.response.send_message(f'Your recipient doesn\'t have a player channel! Have a gm use /set_player_channel to give them one!', ephemeral=True)
@@ -484,14 +571,16 @@ async def vigShot(interaction, target :discord.Member):
 		await interaction.response.send_message(f'Your target is not in the list of active players!', ephemeral=True)
 	elif not shooterHasAmmo:
 		await interaction.response.send_message(f'You don\'t have ammo for that!', ephemeral=True)
-	elif deadRole in interaction.user.roles:
+	elif ((deadRole in interaction.user.roles) or (players[shooterIndex].isDead)):
 		await interaction.response.send_message(f'You can\'t shoot while dead!', ephemeral=True)
-	elif deadRole in target.roles:
+	elif ((deadRole in target.roles) or (players[targetIndex].isDead)):
 		await interaction.response.send_message(f'You can\'t shoot dead people!', ephemeral=True)
 	elif state.phaseNumber<=1:
 		await interaction.response.send_message(f'You can\'t shoot until Day 2!', ephemeral=True)
 	elif not state.isDay:
 		await interaction.response.send_message(f'You can only shoot during the day!', ephemeral=True)
+	elif state.isMasquerade:
+		await interaction.response.send_message(f'You can\'t use this during masquerades! Use /mshoot instead.', ephemeral=True)
 	else:
 		await dayChannel.set_permissions(interaction.guild.default_role, send_messages=False)
 		state.advancePhase()
@@ -508,12 +597,10 @@ async def vigShot(interaction, target :discord.Member):
 
 		players[shooterIndex].canVigShot=False
 		await target.add_roles(deadRole)
+		players[targetIndex].isDead=True
 		pSave(players, playersSaveFile)
 		pSave(state, stateSaveFile)
 		await interaction.response.send_message(f'You successfully shot your target!', ephemeral=True)
-
-
-
 
 #v----- TOGGLERS -----v
 @tree.context_menu(
@@ -645,7 +732,7 @@ async def on_message(message):
 				try:
 					await dayChannel.set_permissions(interaction.guild.default_role, send_messages=False)
 				except:
-					logChannel.send(f'Couldn\'t lock day channel. Does it exist? Check with !viewDayChannel')
+					await logChannel.send(f'Couldn\'t lock day channel. Does it exist? Check with !viewDayChannel')
 			pSave(players, playersSaveFile)
 		pSave(state, stateSaveFile)
 		await logChannel.send(f'{message.author.display_name} advanced the phase! It is now {state.returnDayState()}!')
