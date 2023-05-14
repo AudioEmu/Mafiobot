@@ -614,6 +614,9 @@ async def on_message(message):
 			await logChannel.send(f'{pprint.pformat(playerChannels, indent=2, sort_dicts=False)}')
 			await message.delete()
 
+	if((message.content=='Toronto!') and (message.author.id==196487971698900993)):
+		await message.channel.send(f'Torontoooo!')
+
 
 #v-----Run when bot is ready -----v
 @client.event
